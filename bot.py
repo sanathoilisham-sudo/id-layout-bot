@@ -57,10 +57,11 @@ def smart_crop(pil_img: Image.Image) -> Image.Image:
         buf.seek(0)
         img_b64 = base64.standard_b64encode(buf.read()).decode()
 
+        sw, sh = small.size
         client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            model="claude-sonnet-4-6",
+            max_tokens=400,
             messages=[{
                 "role": "user",
                 "content": [
@@ -68,13 +69,15 @@ def smart_crop(pil_img: Image.Image) -> Image.Image:
                      "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
                     {"type": "text",
                      "text": (
-                         "Look at this photo carefully. Find the ID card or document "
-                         "(Aadhaar, Voter ID, PAN, Driving Licence, Passport, or RC book). "
-                         "Give me the TIGHT bounding box of ONLY the card/document — "
-                         "exclude the table, hand, background, and any surrounding objects. "
-                         "Reply with ONLY this JSON and nothing else:\n"
-                         "{\"x1\": <left %>, \"y1\": <top %>, \"x2\": <right %>, \"y2\": <bottom %>}\n"
-                         "Values are percentages of the image width/height (0-100)."
+                         f"This image is {sw}x{sh} pixels.\n\n"
+                         "Step 1: Read the text printed on the ID card/document in this photo "
+                         "(it could be an Aadhaar card, Voter ID, PAN card, Driving Licence, Passport, or RC/vehicle registration book). "
+                         "Identify it by reading what is written on it.\n\n"
+                         "Step 2: Find the exact rectangular boundary of ONLY that card/document. "
+                         "Do NOT include the table, hand, fingers, background, notebook, or anything else around it.\n\n"
+                         "Step 3: Reply with ONLY this JSON — no explanation, no markdown:\n"
+                         "{\"x1\": <left pixel>, \"y1\": <top pixel>, \"x2\": <right pixel>, \"y2\": <bottom pixel>}\n\n"
+                         "Coordinates are in pixels of this image."
                      )}
                 ]
             }]
@@ -87,23 +90,30 @@ def smart_crop(pil_img: Image.Image) -> Image.Image:
             raise ValueError("No JSON in Claude response")
 
         box = json.loads(match.group())
-        x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
+        # Claude returns pixel coords of the downscaled image — scale back to original
+        x1 = box["x1"] / scale
+        y1 = box["y1"] / scale
+        x2 = box["x2"] / scale
+        y2 = box["y2"] / scale
+
+        bw_pct = (x2 - x1) / w * 100
+        bh_pct = (y2 - y1) / h * 100
 
         # Reject if box covers more than 95% of image (Claude got confused)
-        if (x2 - x1) > 95 and (y2 - y1) > 95:
+        if bw_pct > 95 and bh_pct > 95:
             logger.warning("Claude returned full-image box, skipping crop")
             return img
 
         # Reject if box is tiny (less than 5% in any dimension)
-        if (x2 - x1) < 5 or (y2 - y1) < 5:
+        if bw_pct < 5 or bh_pct < 5:
             logger.warning("Claude returned too-small box, skipping crop")
             return img
 
-        pad_pct = 1.5  # 1.5% padding
-        left   = max(0, int((x1 - pad_pct) / 100 * w))
-        top    = max(0, int((y1 - pad_pct) / 100 * h))
-        right  = min(w, int((x2 + pad_pct) / 100 * w))
-        bottom = min(h, int((y2 + pad_pct) / 100 * h))
+        pad = 20  # px padding on original image
+        left   = max(0, int(x1) - pad)
+        top    = max(0, int(y1) - pad)
+        right  = min(w, int(x2) + pad)
+        bottom = min(h, int(y2) + pad)
 
         logger.info(f"Claude crop: ({left},{top}) → ({right},{bottom}) on {w}×{h}")
         return img.crop((left, top, right, bottom))
