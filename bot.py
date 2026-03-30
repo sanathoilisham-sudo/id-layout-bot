@@ -550,7 +550,7 @@ async def set_commands(app):
         ("id",          "Make ID card PDF — choose doc type first"),
         ("start",       "Show instructions"),
         ("reset",       "Reset and start over"),
-        ("merge",       "Merge multiple PDFs into one"),
+        ("merge",       "Merge PDFs and images (JPG/PNG) into one PDF"),
         ("done",        "Finish merging and get PDF"),
         ("cancel",      "Cancel current merge"),
         ("liststaff",   "List authorized staff (admin only)"),
