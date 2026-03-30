@@ -45,16 +45,16 @@ def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesI
     buf = BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=A4)
 
-    def draw_card(pil_img, y_top):
+    def draw_card(pil_img, y_center):
         img_buf = BytesIO()
         pil_img.save(img_buf, format="JPEG", quality=92)
         img_buf.seek(0)
-        c.drawImage(ImageReader(img_buf), x_start, y_top - card_h,
+        c.drawImage(ImageReader(img_buf), x_start, y_center - card_h / 2,
                     width=card_w, height=card_h, preserveAspectRatio=True, anchor="c")
 
-    top_y = A4_H - MARGIN
-    draw_card(front, top_y)
-    draw_card(back,  top_y - card_h - GAP)
+    # Front centered in top half, back centered in bottom half
+    draw_card(front, A4_H * 3 / 4)
+    draw_card(back,  A4_H * 1 / 4)
 
     c.save()
     buf.seek(0)
