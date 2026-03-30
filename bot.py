@@ -443,7 +443,7 @@ async def merge_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     pdfs = context.user_data.get("merge_pdfs", [])
     if len(pdfs) < 2:
-        await update.message.reply_text("Please send at least 2 PDF files before /done.")
+        await update.message.reply_text("Please send at least 2 files before /done.")
         return
     await update.message.reply_text(f"Merging {len(pdfs)} PDFs, please wait...")
     try:
@@ -542,7 +542,7 @@ app.add_handler(CommandHandler("cancel",       merge_cancel))
 app.add_handler(CallbackQueryHandler(handle_id_select,  pattern="^id:"))
 app.add_handler(CallbackQueryHandler(handle_doc_type,   pattern="^dt:"))
 app.add_handler(MessageHandler(filters.PHOTO,                       handle_photo))
-app.add_handler(MessageHandler(filters.Document.PDF,                handle_document))
+app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.IMAGE, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,     handle_text))
 
 async def set_commands(app):
