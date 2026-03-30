@@ -33,15 +33,75 @@ WAITING_BACK     = "waiting_back"
 media_groups: dict = {}
 
 
-# ── Claude smart crop ─────────────────────────────────────────────────────────
+# ── Smart crop ────────────────────────────────────────────────────────────────
 
-def smart_crop(pil_img: Image.Image) -> Image.Image:
-    """Use Claude to detect the document in the photo and crop it tightly."""
-    if not ANTHROPIC_KEY:
-        return pil_img.convert("RGB")
+def _pil_crop(img: Image.Image) -> Image.Image | None:
+    """
+    Detect the ID card by contrast against the background.
+    Works by sampling border pixels to estimate background brightness,
+    then thresholding to find the bright card region.
+    """
+    from PIL import ImageFilter
+    gray = img.convert("L")
+    w, h = gray.size
+    data = list(gray.getdata())
+
+    border_w = max(10, w // 15)
+    border_h = max(10, h // 15)
+
+    # Sample only the actual border rows/columns
+    border_vals = []
+    for y in list(range(border_h)) + list(range(h - border_h, h)):
+        for x in range(w):
+            border_vals.append(data[y * w + x])
+    for y in range(border_h, h - border_h):
+        for x in list(range(border_w)) + list(range(w - border_w, w)):
+            border_vals.append(data[y * w + x])
+
+    bg = sum(border_vals) / len(border_vals) if border_vals else 128
+    logger.info(f"Background brightness: {bg:.1f}")
+
+    margin = 45
+    if bg < 128:
+        # Dark background → find bright card
+        mask = gray.point(lambda p: 255 if p > bg + margin else 0)
+    else:
+        # Light background → find dark card
+        mask = gray.point(lambda p: 255 if p < bg - margin else 0)
+
+    # Smooth noise with median filter before finding bbox
+    mask = mask.filter(ImageFilter.MedianFilter(size=7))
+
+    bbox = mask.getbbox()
+    if not bbox:
+        return None
+
+    bw = bbox[2] - bbox[0]
+    bh = bbox[3] - bbox[1]
+
+    # Skip if crop is trivially the whole image or too small
+    if bw > w * 0.92 and bh > h * 0.92:
+        logger.info("PIL crop: result too close to full image, skipping")
+        return None
+    if bw < w * 0.08 or bh < h * 0.08:
+        logger.info("PIL crop: result too small, skipping")
+        return None
+
+    pad = 18
+    left   = max(0, bbox[0] - pad)
+    top    = max(0, bbox[1] - pad)
+    right  = min(w, bbox[2] + pad)
+    bottom = min(h, bbox[3] + pad)
+
+    logger.info(f"PIL crop: ({left},{top}) → ({right},{bottom})  [card {bw}×{bh} in {w}×{h}]")
+    return img.crop((left, top, right, bottom))
+
+
+def _claude_crop(img: Image.Image) -> Image.Image | None:
+    """Claude Vision fallback — used only when PIL crop fails."""
     try:
         buf = BytesIO()
-        pil_img.convert("RGB").save(buf, format="JPEG", quality=85)
+        img.save(buf, format="JPEG", quality=85)
         buf.seek(0)
         img_b64 = base64.standard_b64encode(buf.read()).decode()
 
@@ -52,46 +112,51 @@ def smart_crop(pil_img: Image.Image) -> Image.Image:
             messages=[{
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": img_b64
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Locate the ID document (card or booklet) in this photo. "
-                            "Return ONLY a JSON object — no explanation — with the bounding box "
-                            "as percentages of image dimensions: "
-                            "{\"x1\":0-100,\"y1\":0-100,\"x2\":0-100,\"y2\":0-100} "
-                            "where x1,y1 is top-left and x2,y2 is bottom-right."
-                        )
-                    }
+                    {"type": "image",
+                     "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
+                    {"type": "text",
+                     "text": (
+                         "Find the ID card/document in this photo. "
+                         "Return ONLY JSON with tight bounding box as % of image: "
+                         "{\"x1\":N,\"y1\":N,\"x2\":N,\"y2\":N} "
+                         "Be as tight as possible — just the card edges, no background."
+                     )}
                 ]
             }]
         )
-
         text = response.content[0].text.strip()
         match = re.search(r'\{[^}]+\}', text)
         if match:
             box = json.loads(match.group())
-            w, h = pil_img.size
-            pad = 8  # px padding around detected area
-            left   = max(0,  int(box["x1"] / 100 * w) - pad)
-            top    = max(0,  int(box["y1"] / 100 * h) - pad)
-            right  = min(w,  int(box["x2"] / 100 * w) + pad)
-            bottom = min(h,  int(box["y2"] / 100 * h) + pad)
+            w, h = img.size
+            pad = 6
+            left   = max(0, int(box["x1"] / 100 * w) - pad)
+            top    = max(0, int(box["y1"] / 100 * h) - pad)
+            right  = min(w, int(box["x2"] / 100 * w) + pad)
+            bottom = min(h, int(box["y2"] / 100 * h) + pad)
             if right > left and bottom > top:
                 logger.info(f"Claude crop: ({left},{top}) → ({right},{bottom})")
-                return pil_img.crop((left, top, right, bottom)).convert("RGB")
-
+                return img.crop((left, top, right, bottom))
     except Exception as e:
-        logger.warning(f"Claude crop failed, using full image: {e}")
+        logger.warning(f"Claude crop failed: {e}")
+    return None
 
-    return pil_img.convert("RGB")
+
+def smart_crop(pil_img: Image.Image) -> Image.Image:
+    """PIL-first crop with Claude Vision as fallback."""
+    img = pil_img.convert("RGB")
+
+    result = _pil_crop(img)
+    if result is not None:
+        return result
+
+    if ANTHROPIC_KEY:
+        result = _claude_crop(img)
+        if result is not None:
+            return result
+
+    logger.info("smart_crop: no crop detected, using full image")
+    return img
 
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
