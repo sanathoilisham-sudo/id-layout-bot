@@ -197,15 +197,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data.clear()
     await update.message.reply_text(
-        "Welcome to *ID Document Layout Bot!*\n\n"
-        "Tip: Crop your photo to just the card before sending for best results.\n\n"
-        "*Option A — Album (faster):*\n"
-        "Select both front & back photos and send together as an album.\n"
-        "Then tap the doc type button.\n\n"
+        "📋 *ID Document Layout Bot — Quick Guide*\n\n"
+        "──────────────────────\n"
+        "🪪 *Make ID Card PDF*\n"
+        "──────────────────────\n"
+        "*Option A — 2 photos at once (faster):*\n"
+        "1. Select front + back photos together\n"
+        "2. Send as album\n"
+        "3. Tap the document type button\n"
+        "4. Receive your PDF ✅\n\n"
         "*Option B — One by one:*\n"
         "1. Send front photo → pick doc type\n"
-        "2. Send back photo → get PDF\n\n"
-        "Use /reset to start over.",
+        "2. Send back photo → receive PDF ✅\n\n"
+        "💡 Tip: Crop photo to just the card before sending\n\n"
+        "──────────────────────\n"
+        "📎 *Merge PDFs*\n"
+        "──────────────────────\n"
+        "1. Send /merge\n"
+        "2. Send PDF files one by one\n"
+        "3. Send /done → receive merged PDF ✅\n"
+        "   Send /cancel to abort\n\n"
+        "──────────────────────\n"
+        "⚙️ *Other Commands*\n"
+        "──────────────────────\n"
+        "/start — Show this guide\n"
+        "/reset — Start over\n"
+        "/merge — Start PDF merge\n"
+        "/done  — Finish merging\n"
+        "/cancel — Cancel merge",
         parse_mode="Markdown"
     )
 
@@ -424,6 +443,20 @@ app.add_handler(CallbackQueryHandler(handle_doc_type, pattern="^dt:"))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+async def set_commands(app):
+    await app.bot.set_my_commands([
+        ("start",       "Start the bot / see instructions"),
+        ("reset",       "Reset and start over"),
+        ("merge",       "Merge multiple PDFs into one"),
+        ("done",        "Finish merging and get PDF"),
+        ("cancel",      "Cancel current merge"),
+        ("liststaff",   "List authorized staff (admin only)"),
+        ("addstaff",    "Add a staff member (admin only)"),
+        ("removestaff", "Remove a staff member (admin only)"),
+    ])
+
+app.post_init = set_commands
 
 logger.info("Bot is running...")
 app.run_polling()
