@@ -33,10 +33,10 @@ def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesI
     MARGIN = 40
     GAP    = 28
 
-    # Card size: 9cm × 6cm
+    # Card size: 10cm × 8cm
     CM_TO_PT = 72 / 2.54
-    card_w = 9 * CM_TO_PT   # 255 pt
-    card_h = 6 * CM_TO_PT   # 170 pt
+    card_w = 10 * CM_TO_PT  # 283 pt
+    card_h = 8  * CM_TO_PT  # 227 pt
 
     usable_w = A4_W - 2 * MARGIN
 
