@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 from io import BytesIO
 from PIL import Image
@@ -11,7 +10,6 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
-from datetime import date
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,7 +32,6 @@ def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesI
     A4_W, A4_H = A4          # 595 x 842 pt
     MARGIN = 40
     GAP    = 28
-    HEADER = 38              # space for title + date
 
     # Card size: 9cm × 6cm
     CM_TO_PT = 72 / 2.54
@@ -48,38 +45,17 @@ def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesI
     buf = BytesIO()
     c = pdf_canvas.Canvas(buf, pagesize=A4)
 
-    c.setFont("Helvetica-Bold", 11)
-    c.setFillColorRGB(0.2, 0.2, 0.2)
-    c.drawCentredString(A4_W / 2, A4_H - MARGIN, doc_type + " - Front & Back")
-    c.setFont("Helvetica", 7)
-    c.setFillColorRGB(0.6, 0.6, 0.6)
-    c.drawCentredString(A4_W / 2, A4_H - MARGIN - 14,
-                        "Generated on " + date.today().strftime("%d %B %Y"))
-    c.setStrokeColorRGB(0.85, 0.85, 0.85)
-    c.setLineWidth(0.5)
-    c.line(MARGIN, A4_H - MARGIN - 24, A4_W - MARGIN, A4_H - MARGIN - 24)
-
-    def draw_card(pil_img, label, y_top):
-        c.setFont("Helvetica", 8)
-        c.setFillColorRGB(0.5, 0.5, 0.5)
-        c.drawString(x_start, y_top - 12, label.upper())
-        img_y = y_top - 18 - card_h
+    def draw_card(pil_img, y_top):
         img_buf = BytesIO()
         pil_img.save(img_buf, format="JPEG", quality=92)
         img_buf.seek(0)
-        c.setStrokeColorRGB(0.8, 0.8, 0.8)
-        c.setLineWidth(0.75)
-        c.rect(x_start - 1, img_y - 1, card_w + 2, card_h + 2, stroke=1, fill=0)
-        c.drawImage(ImageReader(img_buf), x_start, img_y,
+        c.drawImage(ImageReader(img_buf), x_start, y_top - card_h,
                     width=card_w, height=card_h, preserveAspectRatio=True, anchor="c")
 
-    top_y = A4_H - MARGIN - 38
-    draw_card(front, "Front side", top_y)
-    draw_card(back,  "Back side",  top_y - card_h - GAP - 20)
+    top_y = A4_H - MARGIN
+    draw_card(front, top_y)
+    draw_card(back,  top_y - card_h - GAP)
 
-    c.setFont("Helvetica", 7)
-    c.setFillColorRGB(0.7, 0.7, 0.7)
-    c.drawCentredString(A4_W / 2, 20, "ID Document Layout Bot")
     c.save()
     buf.seek(0)
     return buf
