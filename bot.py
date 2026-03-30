@@ -36,18 +36,12 @@ def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesI
     GAP    = 28
     HEADER = 38              # space for title + date
 
-    # Standard ID card: 85.6mm x 54mm → 242.7pt x 153.1pt
-    # Scale up 1.9× so cards are large and clear on A4 print
-    MM_TO_PT = 72 / 25.4
-    card_w = 85.6 * MM_TO_PT * 1.9   # ≈ 461 pt
-    card_h = 54.0 * MM_TO_PT * 1.9   # ≈ 291 pt
+    # Card size: 9cm × 6cm
+    CM_TO_PT = 72 / 2.54
+    card_w = 9 * CM_TO_PT   # 255 pt
+    card_h = 6 * CM_TO_PT   # 170 pt
 
-    # If card_w exceeds usable width, scale down to fit
     usable_w = A4_W - 2 * MARGIN
-    if card_w > usable_w:
-        scale = usable_w / card_w
-        card_w *= scale
-        card_h *= scale
 
     x_start = MARGIN + (usable_w - card_w) / 2
 
