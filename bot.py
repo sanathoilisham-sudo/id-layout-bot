@@ -32,21 +32,8 @@ def set_state(context, state):
     context.user_data["state"] = state
 
 
-def crop_to_card(img):
-    img = img.convert("RGB")
-    TARGET_W, TARGET_H = 856, 540
-    img_ratio = img.width / img.height
-    target_ratio = TARGET_W / TARGET_H
-    if img_ratio > target_ratio:
-        new_w = TARGET_W
-        new_h = int(TARGET_W / img_ratio)
-    else:
-        new_h = TARGET_H
-        new_w = int(TARGET_H * img_ratio)
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    canvas = Image.new("RGB", (TARGET_W, TARGET_H), (255, 255, 255))
-    canvas.paste(img, ((TARGET_W - new_w) // 2, (TARGET_H - new_h) // 2))
-    return canvas
+def prepare_image(img):
+    return img.convert("RGB")
 
 
 def build_a4_pdf(front, back, doc_type):
@@ -143,7 +130,7 @@ async def handle_photo(update: Update, context: ContextTypes):
         return
 
     if state == WAITING_FRONT:
-        context.user_data["front"] = crop_to_card(pil_img)
+        context.user_data["front"] = prepare_image(pil_img)
         set_state(context, WAITING_DOC_TYPE)
         await update.message.reply_text(
             "Front photo saved! What type of ID is this?",
@@ -155,7 +142,7 @@ async def handle_photo(update: Update, context: ContextTypes):
         try:
             front = context.user_data["front"]
             doc_type = context.user_data.get("doc_type", "ID Document")
-            pdf_buf = build_a4_pdf(front, crop_to_card(pil_img), doc_type)
+            pdf_buf = build_a4_pdf(front, prepare_image(pil_img), doc_type)
             filename = doc_type.replace(" ", "_") + "_A4.pdf"
             await update.message.reply_document(
                 document=pdf_buf,
