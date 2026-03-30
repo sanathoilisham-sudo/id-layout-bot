@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from io import BytesIO
 from PIL import Image
@@ -15,6 +16,25 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8791561190:AAEhUy4CwVyWJZgnM21LRqSgLEJd5InjdbY")
+ADMIN_ID  = int(os.environ.get("ADMIN_ID", "1486225152"))
+
+STAFF_FILE = "staff.json"
+
+def load_staff() -> set:
+    try:
+        with open(STAFF_FILE) as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+def save_staff(staff: set):
+    with open(STAFF_FILE, "w") as f:
+        json.dump(list(staff), f)
+
+allowed_ids: set = load_staff()
+
+def is_authorized(uid: int) -> bool:
+    return uid == ADMIN_ID or uid in allowed_ids
 
 DOC_TYPES = ["Aadhaar", "Voter ID", "PAN", "Passport", "Driving Licence", "Other"]
 
@@ -125,9 +145,55 @@ async def process_media_group(context: ContextTypes.DEFAULT_TYPE):
         context.application.user_data.get(uid, {}).clear()
 
 
+# ── Admin commands ───────────────────────────────────────────────────────────
+
+async def addstaff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Not authorized.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /addstaff <telegram_id>")
+        return
+    try:
+        new_id = int(context.args[0])
+        allowed_ids.add(new_id)
+        save_staff(allowed_ids)
+        await update.message.reply_text(f"Staff {new_id} added successfully.")
+    except ValueError:
+        await update.message.reply_text("Invalid ID. Must be a number.")
+
+async def removestaff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Not authorized.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /removestaff <telegram_id>")
+        return
+    try:
+        rem_id = int(context.args[0])
+        allowed_ids.discard(rem_id)
+        save_staff(allowed_ids)
+        await update.message.reply_text(f"Staff {rem_id} removed.")
+    except ValueError:
+        await update.message.reply_text("Invalid ID. Must be a number.")
+
+async def liststaff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Not authorized.")
+        return
+    if not allowed_ids:
+        await update.message.reply_text("No staff added yet.")
+        return
+    lines = "\n".join(str(i) for i in allowed_ids)
+    await update.message.reply_text(f"Authorized staff:\n{lines}")
+
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
     context.user_data.clear()
     await update.message.reply_text(
         "Welcome to *ID Document Layout Bot!*\n\n"
@@ -151,6 +217,9 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid     = update.effective_user.id
+    if not is_authorized(uid):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
     chat_id = update.effective_chat.id
     mgid    = update.message.media_group_id
 
@@ -251,6 +320,9 @@ async def handle_doc_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
     state = context.user_data.get("state", WAITING_FRONT)
     msgs = {
         WAITING_FRONT:    "Send the *front* photo of your ID to begin.",
@@ -273,6 +345,9 @@ app = (
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("reset", reset))
+app.add_handler(CommandHandler("addstaff", addstaff))
+app.add_handler(CommandHandler("removestaff", removestaff))
+app.add_handler(CommandHandler("liststaff", liststaff))
 app.add_handler(CallbackQueryHandler(handle_doc_type, pattern="^dt:"))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
