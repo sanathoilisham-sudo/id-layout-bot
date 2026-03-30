@@ -1,7 +1,4 @@
 import os
-import re
-import json
-import base64
 import asyncio
 import logging
 from io import BytesIO
@@ -15,13 +12,11 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes
 )
 from datetime import date
-import anthropic
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN      = os.environ.get("BOT_TOKEN", "8791561190:AAEhUy4CwVyWJZgnM21LRqSgLEJd5InjdbY")
-ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8791561190:AAEhUy4CwVyWJZgnM21LRqSgLEJd5InjdbY")
 
 DOC_TYPES = ["Aadhaar", "Voter ID", "PAN", "Passport", "Driving Licence", "Other"]
 
@@ -33,107 +28,27 @@ WAITING_BACK     = "waiting_back"
 media_groups: dict = {}
 
 
-# ── Smart crop ────────────────────────────────────────────────────────────────
-
-def smart_crop(pil_img: Image.Image) -> Image.Image:
-    """
-    Use Claude Vision to detect and crop the ID document.
-    Falls back to full image if Claude fails or returns an unreasonably large box.
-    """
-    img = pil_img.convert("RGB")
-
-    if not ANTHROPIC_KEY:
-        return img
-
-    try:
-        # Downscale for API call to save cost/speed, then scale coords back
-        MAX_SIDE = 1024
-        w, h = img.size
-        scale = min(1.0, MAX_SIDE / max(w, h))
-        small = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS) if scale < 1.0 else img
-
-        buf = BytesIO()
-        small.save(buf, format="JPEG", quality=88)
-        buf.seek(0)
-        img_b64 = base64.standard_b64encode(buf.read()).decode()
-
-        sw, sh = small.size
-        client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=400,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image",
-                     "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
-                    {"type": "text",
-                     "text": (
-                         f"This image is {sw}x{sh} pixels.\n\n"
-                         "Step 1: Read the text printed on the ID card/document in this photo "
-                         "(it could be an Aadhaar card, Voter ID, PAN card, Driving Licence, Passport, or RC/vehicle registration book). "
-                         "Identify it by reading what is written on it.\n\n"
-                         "Step 2: Find the exact rectangular boundary of ONLY that card/document. "
-                         "Do NOT include the table, hand, fingers, background, notebook, or anything else around it.\n\n"
-                         "Step 3: Reply with ONLY this JSON — no explanation, no markdown:\n"
-                         "{\"x1\": <left pixel>, \"y1\": <top pixel>, \"x2\": <right pixel>, \"y2\": <bottom pixel>}\n\n"
-                         "Coordinates are in pixels of this image."
-                     )}
-                ]
-            }]
-        )
-
-        text = response.content[0].text.strip()
-        logger.info(f"Claude response: {text}")
-        match = re.search(r'\{[^}]+\}', text)
-        if not match:
-            raise ValueError("No JSON in Claude response")
-
-        box = json.loads(match.group())
-        # Claude returns pixel coords of the downscaled image — scale back to original
-        x1 = box["x1"] / scale
-        y1 = box["y1"] / scale
-        x2 = box["x2"] / scale
-        y2 = box["y2"] / scale
-
-        bw_pct = (x2 - x1) / w * 100
-        bh_pct = (y2 - y1) / h * 100
-
-        # Reject if box covers more than 95% of image (Claude got confused)
-        if bw_pct > 95 and bh_pct > 95:
-            logger.warning("Claude returned full-image box, skipping crop")
-            return img
-
-        # Reject if box is tiny (less than 5% in any dimension)
-        if bw_pct < 5 or bh_pct < 5:
-            logger.warning("Claude returned too-small box, skipping crop")
-            return img
-
-        pad = 20  # px padding on original image
-        left   = max(0, int(x1) - pad)
-        top    = max(0, int(y1) - pad)
-        right  = min(w, int(x2) + pad)
-        bottom = min(h, int(y2) + pad)
-
-        logger.info(f"Claude crop: ({left},{top}) → ({right},{bottom}) on {w}×{h}")
-        return img.crop((left, top, right, bottom))
-
-    except Exception as e:
-        logger.warning(f"Claude crop failed: {e}")
-        return img
-
-
 # ── PDF builder ───────────────────────────────────────────────────────────────
 
 def build_a4_pdf(front: Image.Image, back: Image.Image, doc_type: str) -> BytesIO:
-    A4_W, A4_H = A4
+    A4_W, A4_H = A4          # 595 x 842 pt
     MARGIN = 40
-    GAP = 24
+    GAP    = 28
+    HEADER = 38              # space for title + date
+
+    # Standard ID card: 85.6mm x 54mm → 242.7pt x 153.1pt
+    # Scale up 1.9× so cards are large and clear on A4 print
+    MM_TO_PT = 72 / 25.4
+    card_w = 85.6 * MM_TO_PT * 1.9   # ≈ 461 pt
+    card_h = 54.0 * MM_TO_PT * 1.9   # ≈ 291 pt
+
+    # If card_w exceeds usable width, scale down to fit
     usable_w = A4_W - 2 * MARGIN
-    card_h = (A4_H - 2 * MARGIN - 38 - GAP - 40) / 2
-    card_w = min(usable_w, card_h * 1.585)
-    if card_w < card_h * 1.585:
-        card_h = card_w / 1.585
+    if card_w > usable_w:
+        scale = usable_w / card_w
+        card_w *= scale
+        card_h *= scale
+
     x_start = MARGIN + (usable_w - card_w) / 2
 
     buf = BytesIO()
@@ -194,13 +109,9 @@ async def download_image(photo_obj) -> Image.Image:
     return Image.open(BytesIO(bytes(data)))
 
 async def generate_and_send_pdf(bot, chat_id, front_img, back_img, doc_type):
-    await bot.send_message(chat_id, "Cropping with AI and generating PDF, please wait...")
-    loop = asyncio.get_event_loop()
-    # Run both crops concurrently in thread pool so event loop stays free
-    front, back = await asyncio.gather(
-        loop.run_in_executor(None, smart_crop, front_img),
-        loop.run_in_executor(None, smart_crop, back_img),
-    )
+    await bot.send_message(chat_id, "Generating PDF, please wait...")
+    front = front_img.convert("RGB")
+    back  = back_img.convert("RGB")
     pdf_buf  = build_a4_pdf(front, back, doc_type)
     filename = doc_type.replace(" ", "_") + "_A4.pdf"
     await bot.send_document(
@@ -250,13 +161,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
         "Welcome to *ID Document Layout Bot!*\n\n"
+        "Tip: Crop your photo to just the card before sending for best results.\n\n"
         "*Option A — Album (faster):*\n"
-        "Select both front & back photos and send them together as an album.\n"
+        "Select both front & back photos and send together as an album.\n"
         "Then tap the doc type button.\n\n"
         "*Option B — One by one:*\n"
         "1. Send front photo → pick doc type\n"
         "2. Send back photo → get PDF\n\n"
-        "Claude AI will auto-crop the document for you.\n\n"
         "Use /reset to start over.",
         parse_mode="Markdown"
     )
