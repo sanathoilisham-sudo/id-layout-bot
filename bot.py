@@ -195,8 +195,12 @@ async def download_image(photo_obj) -> Image.Image:
 
 async def generate_and_send_pdf(bot, chat_id, front_img, back_img, doc_type):
     await bot.send_message(chat_id, "Cropping with AI and generating PDF, please wait...")
-    front = smart_crop(front_img)
-    back  = smart_crop(back_img)
+    loop = asyncio.get_event_loop()
+    # Run both crops concurrently in thread pool so event loop stays free
+    front, back = await asyncio.gather(
+        loop.run_in_executor(None, smart_crop, front_img),
+        loop.run_in_executor(None, smart_crop, back_img),
+    )
     pdf_buf  = build_a4_pdf(front, back, doc_type)
     filename = doc_type.replace(" ", "_") + "_A4.pdf"
     await bot.send_document(
