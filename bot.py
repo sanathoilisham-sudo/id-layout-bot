@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from io import BytesIO
+from pypdf import PdfWriter, PdfReader
 from PIL import Image
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.pagesizes import A4
@@ -319,6 +320,74 @@ async def handle_doc_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def merge_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
+    context.user_data["merge_mode"] = True
+    context.user_data["merge_pdfs"] = []
+    await update.message.reply_text(
+        "Merge mode ON.\n\nSend me the PDF files one by one.\nWhen done, send /done to get the merged PDF.\nSend /cancel to abort."
+    )
+
+async def merge_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+    pdfs = context.user_data.get("merge_pdfs", [])
+    if len(pdfs) < 2:
+        await update.message.reply_text("Please send at least 2 PDF files before /done.")
+        return
+    await update.message.reply_text(f"Merging {len(pdfs)} PDFs, please wait...")
+    try:
+        writer = PdfWriter()
+        for pdf_bytes in pdfs:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            for page in reader.pages:
+                writer.add_page(page)
+        out = BytesIO()
+        writer.write(out)
+        out.seek(0)
+        await update.message.reply_document(
+            document=out,
+            filename="merged.pdf",
+            caption=f"Merged {len(pdfs)} PDFs successfully!"
+        )
+    except Exception as e:
+        logger.error(f"Merge error: {e}")
+        await update.message.reply_text("Error merging PDFs. Try again.")
+    finally:
+        context.user_data.pop("merge_mode", None)
+        context.user_data.pop("merge_pdfs", None)
+
+async def merge_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+    context.user_data.pop("merge_mode", None)
+    context.user_data.pop("merge_pdfs", None)
+    await update.message.reply_text("Merge cancelled.")
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
+    if not context.user_data.get("merge_mode"):
+        await update.message.reply_text("Send /merge to start merging PDFs.")
+        return
+    doc = update.message.document
+    if not doc.file_name.lower().endswith(".pdf"):
+        await update.message.reply_text("Only PDF files are accepted. Please send a .pdf file.")
+        return
+    try:
+        file = await doc.get_file()
+        pdf_bytes = await file.download_as_bytearray()
+        context.user_data["merge_pdfs"].append(bytes(pdf_bytes))
+        count = len(context.user_data["merge_pdfs"])
+        await update.message.reply_text(f"PDF {count} received. Send more or /done to merge.")
+    except Exception as e:
+        logger.error(f"PDF download error: {e}")
+        await update.message.reply_text("Could not read that file. Try again.")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         await update.message.reply_text("You are not authorized to use this bot.")
@@ -348,8 +417,12 @@ app.add_handler(CommandHandler("reset", reset))
 app.add_handler(CommandHandler("addstaff", addstaff))
 app.add_handler(CommandHandler("removestaff", removestaff))
 app.add_handler(CommandHandler("liststaff", liststaff))
+app.add_handler(CommandHandler("merge", merge_start))
+app.add_handler(CommandHandler("done", merge_done))
+app.add_handler(CommandHandler("cancel", merge_cancel))
 app.add_handler(CallbackQueryHandler(handle_doc_type, pattern="^dt:"))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 logger.info("Bot is running...")
