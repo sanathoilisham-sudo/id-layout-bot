@@ -242,6 +242,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(guide, parse_mode="Markdown")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to use this bot.")
+        return
     context.user_data.clear()
     await update.message.reply_text(
         "Reset done! Send front photo or an album of front+back.",
