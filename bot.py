@@ -191,42 +191,55 @@ async def liststaff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
+STAFF_GUIDE = (
+    "📋 *ID Document Layout Bot — Quick Guide*\n\n"
+    "──────────────────────\n"
+    "🪪 *Make ID Card PDF*\n"
+    "──────────────────────\n"
+    "*Option A — 2 photos at once (faster):*\n"
+    "1. Select front + back photos together\n"
+    "2. Send as album\n"
+    "3. Tap the document type button\n"
+    "4. Receive your PDF ✅\n\n"
+    "*Option B — One by one:*\n"
+    "1. Send front photo → pick doc type\n"
+    "2. Send back photo → receive PDF ✅\n\n"
+    "💡 Tip: Crop photo to just the card before sending\n\n"
+    "──────────────────────\n"
+    "📎 *Merge PDFs*\n"
+    "──────────────────────\n"
+    "1. Send /merge\n"
+    "2. Send PDF files one by one\n"
+    "3. Send /done → receive merged PDF ✅\n"
+    "   Send /cancel to abort\n\n"
+    "──────────────────────\n"
+    "⚙️ *Commands*\n"
+    "──────────────────────\n"
+    "/start — Show this guide\n"
+    "/reset — Start over\n"
+    "/merge — Start PDF merge\n"
+    "/done  — Finish merging\n"
+    "/cancel — Cancel merge"
+)
+
+ADMIN_EXTRA = (
+    "\n\n"
+    "──────────────────────\n"
+    "🔐 *Admin Commands*\n"
+    "──────────────────────\n"
+    "/addstaff <id> — Add a staff member\n"
+    "/removestaff <id> — Remove a staff member\n"
+    "/liststaff — List all authorized staff"
+)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
+    uid = update.effective_user.id
+    if not is_authorized(uid):
         await update.message.reply_text("You are not authorized to use this bot.")
         return
     context.user_data.clear()
-    await update.message.reply_text(
-        "📋 *ID Document Layout Bot — Quick Guide*\n\n"
-        "──────────────────────\n"
-        "🪪 *Make ID Card PDF*\n"
-        "──────────────────────\n"
-        "*Option A — 2 photos at once (faster):*\n"
-        "1. Select front + back photos together\n"
-        "2. Send as album\n"
-        "3. Tap the document type button\n"
-        "4. Receive your PDF ✅\n\n"
-        "*Option B — One by one:*\n"
-        "1. Send front photo → pick doc type\n"
-        "2. Send back photo → receive PDF ✅\n\n"
-        "💡 Tip: Crop photo to just the card before sending\n\n"
-        "──────────────────────\n"
-        "📎 *Merge PDFs*\n"
-        "──────────────────────\n"
-        "1. Send /merge\n"
-        "2. Send PDF files one by one\n"
-        "3. Send /done → receive merged PDF ✅\n"
-        "   Send /cancel to abort\n\n"
-        "──────────────────────\n"
-        "⚙️ *Other Commands*\n"
-        "──────────────────────\n"
-        "/start — Show this guide\n"
-        "/reset — Start over\n"
-        "/merge — Start PDF merge\n"
-        "/done  — Finish merging\n"
-        "/cancel — Cancel merge",
-        parse_mode="Markdown"
-    )
+    guide = STAFF_GUIDE + (ADMIN_EXTRA if uid == ADMIN_ID else "")
+    await update.message.reply_text(guide, parse_mode="Markdown")
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
